@@ -1,2 +1,16 @@
 *.sh
 *.tar.gz
+
+# Training/evaluation artifacts
+outputs/
+logs/
+lerobot/outputs/
+
+# Model/checkpoint binaries
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# Evaluation videos
+*.mp4
