@@ -2,6 +2,8 @@
 
 Diffusion Policy (Chi et al., 2023) 및 ACT (Zhao et al., 2023) 논문 분석과 LeRobot 기반 구현 실험 기록
 
+**결과 요약:** Push-T의 50-episode 평가에서 Diffusion Policy는 **24%**, 기본 ACT는 **2%**, temporal ensembling을 끄고 chunk를 길게 실행한 ACT는 **12%** 성공률을 기록했다. 이 조건에서 ACT의 주요 병목은 학습 손실보다 temporal ensembling을 포함한 실행 전략으로 나타났다.
+
 ## 📄 논문 정보
 
 ### Diffusion Policy
@@ -255,7 +257,7 @@ Push-T에서 ACT가 낮은 성공률을 보인 핵심 원인은 `kl_weight`나 b
 
 ## 🗂️ 코드 구조
 ```
-diffusion-policy-study/
+dp-act-policy-study/
 ├── README.md
 ├── lerobot/                         # LeRobot 소스 (submodule)
 │   └── src/lerobot/
@@ -306,8 +308,8 @@ diffusion-policy-study/
 
 ### 환경 세팅
 ```bash
-git clone --recurse-submodules https://github.com/jack2148/diffusion-policy-study.git
-cd diffusion-policy-study/lerobot
+git clone --recurse-submodules https://github.com/jack2148/dp-act-policy-study.git
+cd dp-act-policy-study/lerobot
 conda create -n lerobot python=3.10
 conda activate lerobot
 pip install -e .

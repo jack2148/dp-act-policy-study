@@ -1,0 +1,18 @@
+<mujoco model="fr3 push tool">
+  <!-- scene_builder injects this body under the existing FR3 hand body. -->
+  <worldbody>
+    <body name="push_tool">
+      <geom name="push_tool_geom" type="capsule"
+        fromto="0 0 0.06 0 0 0.39" size="0.015"
+        mass="0.08" friction="0.9 0.02 0.002" rgba="0.95 0.55 0.08 1"/>
+      <site name="push_tool_tip" pos="0 0 0.405" size="0.008"
+        rgba="1 0.2 0.1 1"/>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="push_tool" body2="fr3_hand"/>
+    <exclude body1="push_tool" body2="fr3_left_finger"/>
+    <exclude body1="push_tool" body2="fr3_right_finger"/>
+  </contact>
+</mujoco>

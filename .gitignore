@@ -14,3 +14,15 @@ lerobot/outputs/
 
 # Evaluation videos
 *.mp4
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local-only Push_MuJoCo reference material. The upstream files do not state
+# redistribution terms, so only our handling/attribution note is tracked.
+references/Push_MuJoCo/scene_push.xml
+references/Push_MuJoCo/panda_push.xml
+references/Push_MuJoCo/push_custom.py
+references/Push_MuJoCo/README_original.md
