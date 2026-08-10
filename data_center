@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+echo "[CENTER DATA] 목표 중앙(y 약 0m)에 정렬해 마무리하세요."
+FR3_DATASET_ROOT="${FR3_DATASET_ROOT:-/home/chan/dp-act-policy-study/datasets/data_center_30_v2}" \
+FR3_DATASET_EPISODES="${FR3_DATASET_EPISODES:-30}" \
+  "$(dirname "$0")/data" "$@"

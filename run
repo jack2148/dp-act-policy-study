@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+STUDY_ROOT="/home/chan/dp-act-policy-study"
+TELEOP_ROOT="${OMY_FRANKA_TELEOP_ROOT:-/home/chan/omy_franka_teleop}"
+TELEOP_COMMAND="${TELEOP_ROOT}/teleop"
+ROS_DISTRO_SETUP="/opt/ros/humble/setup.bash"
+OMY_SETUP="${TELEOP_ROOT}/open_manipulator_omy/install/setup.bash"
+OMY_LOCK_FILE="/tmp/dp-act-policy-study-omy.lock"
+
+exec 9>>"${OMY_LOCK_FILE}"
+if ! flock -n 9; then
+  echo "RUN FAILED: another ./run or ./data process is already using OMY." >&2
+  [[ ! -s "${OMY_LOCK_FILE}" ]] || cat "${OMY_LOCK_FILE}" >&2
+  exit 1
+fi
+printf 'lock_owner=run pid=%s started=%s\n' "$$" "$(date --iso-8601=seconds)" >"${OMY_LOCK_FILE}"
+
+PORT_NAME="/dev/ttyUSB0"
+if [[ $# -gt 0 && "$1" != --* ]]; then
+  PORT_NAME="$1"
+  shift
+fi
+
+TELEOP_PID=""
+SIMUL_PID=""
+
+cleanup() {
+  trap - EXIT INT TERM
+
+  if [[ -n "${SIMUL_PID}" ]] && kill -0 "${SIMUL_PID}" 2>/dev/null; then
+    kill -INT "${SIMUL_PID}" 2>/dev/null || true
+  fi
+  if [[ -n "${TELEOP_PID}" ]] && kill -0 "${TELEOP_PID}" 2>/dev/null; then
+    kill -INT "${TELEOP_PID}" 2>/dev/null || true
+  fi
+
+  [[ -z "${SIMUL_PID}" ]] || wait "${SIMUL_PID}" 2>/dev/null || true
+  [[ -z "${TELEOP_PID}" ]] || wait "${TELEOP_PID}" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+echo "Starting OMY leader on ${PORT_NAME}"
+"${TELEOP_COMMAND}" "${PORT_NAME}" 9>&- &
+TELEOP_PID=$!
+
+sleep 2
+if ! kill -0 "${TELEOP_PID}" 2>/dev/null; then
+  wait "${TELEOP_PID}"
+fi
+
+set +u
+source "${ROS_DISTRO_SETUP}"
+source "${OMY_SETUP}"
+set -u
+
+if ros2 control set_controller_state \
+  joint_trajectory_command_broadcaster inactive \
+  --controller-manager /leader/controller_manager \
+  --spin-time 1 >/dev/null 2>&1; then
+  echo "Disabled unused collision trajectory warnings"
+else
+  echo "Warning: could not disable collision trajectory warnings" >&2
+fi
+
+cd "${STUDY_ROOT}"
+echo "Starting FR3 block-push simulation"
+/usr/bin/python3 projects/fr3_block_push/scripts/run_teleop.py \
+  --teleop-root "${TELEOP_ROOT}" \
+  "$@" 9>&- &
+SIMUL_PID=$!
+
+set +e
+wait "${SIMUL_PID}"
+SIMUL_STATUS=$?
+set -e
+
+exit "${SIMUL_STATUS}"

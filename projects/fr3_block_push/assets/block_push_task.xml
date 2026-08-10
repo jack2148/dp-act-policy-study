@@ -20,6 +20,8 @@
 
     <camera name="policy_camera_top" pos="0.55 0 1.45"
       quat="1 0 0 0" fovy="45" resolution="640 480"/>
+    <camera name="operator_camera_overhead" pos="1.10 0 1.55"
+      xyaxes="0 1 0 -0.926 0 0.377" fovy="34" resolution="640 480"/>
 
     <body name="push_table" pos="0.55 0 0.10">
       <geom name="push_table_geom" type="box" size="0.45 0.40 0.10"
@@ -38,5 +40,6 @@
         contype="0" conaffinity="0" rgba="0.15 0.9 0.25 0.28"/>
       <site name="push_goal_site" size="0.008" rgba="0.15 1 0.25 0.9"/>
     </body>
+
   </worldbody>
 </mujoco>

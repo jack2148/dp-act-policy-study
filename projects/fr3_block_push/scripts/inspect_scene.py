@@ -73,6 +73,7 @@ def inspect(teleop_root: Path) -> None:
         (mujoco.mjtObj.mjOBJ_GEOM, config.tool_geom),
         (mujoco.mjtObj.mjOBJ_SITE, config.tool_tip_site),
         (mujoco.mjtObj.mjOBJ_CAMERA, config.camera),
+        (mujoco.mjtObj.mjOBJ_CAMERA, config.viewer_camera),
     ):
         _check(mujoco.mj_name2id(model, object_type, name) >= 0, f"required name {name}")
 
@@ -108,7 +109,11 @@ def inspect(teleop_root: Path) -> None:
     tip_position = data.site_xpos[model.site(config.tool_tip_site).id]
     print(f"PASS: goal position {goal_position}")
     print(f"PASS: pusher tip position {tip_position}")
-    print(f"PASS: policy camera id {model.camera(config.camera).id}")
+    print(
+        "PASS: policy camera ids "
+        f"top={model.camera(config.camera).id}, "
+        f"operator={model.camera(config.viewer_camera).id}"
+    )
     _check(abs(model.opt.timestep - 0.001) <= 1e-12, "model timestep is 0.001 s")
     _check_duplicate_names(model)
 

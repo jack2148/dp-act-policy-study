@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+echo "[LEFT DATA] 목표 안쪽의 왼쪽(y 약 -0.01~-0.015m)에 마무리하세요."
+FR3_DATASET_ROOT="${FR3_DATASET_ROOT:-/home/chan/dp-act-policy-study/datasets/data_left_30_v2}" \
+FR3_DATASET_EPISODES="${FR3_DATASET_EPISODES:-30}" \
+  "$(dirname "$0")/data" "$@"

@@ -17,6 +17,8 @@ class BlockPushConfig:
     tool_geom: str = "push_tool_geom"
     tool_tip_site: str = "push_tool_tip"
     camera: str = "policy_camera_top"
+    viewer_camera: str = "operator_camera_overhead"
+    teleop_mode: str = "full_pose"
 
     success_margin: float = 0.005
     success_speed_threshold: float = 0.01
@@ -30,6 +32,12 @@ class BlockPushConfig:
     reset_seed: int = 0
 
     def validate(self) -> None:
+        if self.teleop_mode not in {
+            "position_only",
+            "orientation_only",
+            "full_pose",
+        }:
+            raise ValueError("unsupported teleop_mode")
         if self.success_margin < 0:
             raise ValueError("success_margin must be non-negative")
         if self.success_speed_threshold <= 0:

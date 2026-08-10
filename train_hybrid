@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Phase-1 ACT training: joint action with a hybrid observation state
+# (7 joint values + 7 EE-pose values + XY goal distance).
+STUDY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DATASET_ROOT="${DATASET_ROOT:-${STUDY_ROOT}/datasets/data_success_50_v3_hybrid}"
+OUTPUT_DIR="${OUTPUT_DIR:-${STUDY_ROOT}/outputs/train/act_fr3_hybrid_v3}"
+STEPS="${STEPS:-5000}"
+BATCH_SIZE="${BATCH_SIZE:-8}"
+CHUNK_SIZE="${CHUNK_SIZE:-64}"
+N_ACTION_STEPS="${N_ACTION_STEPS:-32}"
+
+if [[ ! -f "${DATASET_ROOT}/meta/info.json" ]]; then
+  echo "Missing hybrid dataset: ${DATASET_ROOT}" >&2
+  echo "Run: python3 projects/fr3_block_push/scripts/prepare_hybrid_dataset.py" >&2
+  exit 1
+fi
+
+if ! python3 - <<'PY'
+try:
+    import accelerate  # noqa: F401
+except ImportError:
+    raise SystemExit(1)
+PY
+then
+  echo "Missing dependency: accelerate" >&2
+  echo "Install in the active environment with: python3 -m pip install accelerate" >&2
+  exit 1
+fi
+
+if python3 - <<'PY'
+import torch
+print(f"CUDA available: {torch.cuda.is_available()}")
+if not torch.cuda.is_available():
+    raise SystemExit(1)
+PY
+then
+  DEVICE="cuda"
+else
+  echo "CUDA is not available; refusing to start the GPU training run." >&2
+  echo "Check: nvidia-smi and python3 -c 'import torch; print(torch.cuda.is_available())'" >&2
+  exit 1
+fi
+
+cd "${STUDY_ROOT}"
+export PYTHONPATH="${STUDY_ROOT}/lerobot/src${PYTHONPATH:+:${PYTHONPATH}}"
+
+exec python3 -m lerobot.scripts.lerobot_train \
+  --policy.type=act \
+  --dataset.repo_id=local/fr3_block_push_hybrid \
+  --dataset.root="${DATASET_ROOT}" \
+  --output_dir="${OUTPUT_DIR}" \
+  --job_name=act_fr3_hybrid_v3 \
+  --policy.device="${DEVICE}" \
+  --policy.chunk_size="${CHUNK_SIZE}" \
+  --policy.n_action_steps="${N_ACTION_STEPS}" \
+  --policy.temporal_ensemble_coeff=null \
+  --policy.push_to_hub=false \
+  --steps="${STEPS}" \
+  --batch_size="${BATCH_SIZE}" \
+  --wandb.enable=false

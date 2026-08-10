@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Diffusion Policy baseline on the original 50 FR3 demonstrations.
+STUDY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DATASET_ROOT="${DATASET_ROOT:-${STUDY_ROOT}/datasets/data_success_50_v3}"
+OUTPUT_DIR="${OUTPUT_DIR:-${STUDY_ROOT}/outputs/train/dp_fr3_test_50}"
+STEPS="${STEPS:-5000}"
+BATCH_SIZE="${BATCH_SIZE:-8}"
+HORIZON="${HORIZON:-64}"
+N_OBS_STEPS="${N_OBS_STEPS:-2}"
+N_ACTION_STEPS="${N_ACTION_STEPS:-32}"
+
+if [[ ! -f "${DATASET_ROOT}/meta/info.json" ]]; then
+  echo "Missing dataset: ${DATASET_ROOT}" >&2
+  exit 1
+fi
+
+if ! python3 - <<'PY'
+try:
+    import accelerate, diffusers  # noqa: F401
+except ImportError:
+    raise SystemExit(1)
+PY
+then
+  echo "Missing dependency. Install with:" >&2
+  echo "python3 -m pip install accelerate diffusers" >&2
+  exit 1
+fi
+
+if python3 - <<'PY'
+import torch
+print(f"CUDA available: {torch.cuda.is_available()}")
+if not torch.cuda.is_available():
+    raise SystemExit(1)
+PY
+then
+  DEVICE="cuda"
+else
+  echo "CUDA is not available; refusing to start GPU training." >&2
+  echo "Check nvidia-smi and torch.cuda.is_available()." >&2
+  exit 1
+fi
+
+cd "${STUDY_ROOT}"
+export PYTHONPATH="${STUDY_ROOT}/lerobot/src${PYTHONPATH:+:${PYTHONPATH}}"
+
+exec python3 -m lerobot.scripts.lerobot_train \
+  --policy.type=diffusion \
+  --dataset.repo_id=local/fr3_block_push_dp \
+  --dataset.root="${DATASET_ROOT}" \
+  --output_dir="${OUTPUT_DIR}" \
+  --job_name=dp_fr3_test_50 \
+  --policy.device="${DEVICE}" \
+  --policy.horizon="${HORIZON}" \
+  --policy.n_obs_steps="${N_OBS_STEPS}" \
+  --policy.n_action_steps="${N_ACTION_STEPS}" \
+  --policy.push_to_hub=false \
+  --steps="${STEPS}" \
+  --batch_size="${BATCH_SIZE}" \
+  --wandb.enable=false

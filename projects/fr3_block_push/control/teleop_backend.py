@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 import importlib.util
 import os
@@ -18,6 +19,7 @@ import numpy as np
 TELEOP_ENVIRONMENT_VARIABLE = "OMY_FRANKA_TELEOP_ROOT"
 BRIDGE_RELATIVE_PATH = Path("launch/FR3_omy_bridge.py")
 OMY_RELATIVE_PATH = Path("robotis_mujoco_menagerie/robotis_omy/scene.xml")
+INPUT_BACKENDS = {"ros", "zmq"}
 
 
 def resolve_teleop_root(
@@ -102,6 +104,45 @@ def _load_bridge(teleop_root: Path) -> ModuleType:
     return module
 
 
+def _load_controller_only_bridge(teleop_root: Path) -> ModuleType:
+    """Load the existing controller definitions without importing ROS.
+
+    The external file combines ROS Node code and controller math. IPC mode
+    removes only ROS imports and the ``OmyPose`` Node class from the parsed
+    module; mapping, conditioning, FK helpers, and IK execute from that source.
+    """
+    bridge_path = teleop_root / BRIDGE_RELATIVE_PATH
+    tree = ast.parse(bridge_path.read_text(), filename=str(bridge_path))
+    forbidden_modules = {"rclpy", "sensor_msgs", "std_msgs"}
+    filtered_body = []
+    for node in tree.body:
+        if isinstance(node, ast.Import) and any(
+            alias.name.split(".", 1)[0] in forbidden_modules
+            for alias in node.names
+        ):
+            continue
+        if isinstance(node, ast.ImportFrom) and (
+            node.module or ""
+        ).split(".", 1)[0] in forbidden_modules:
+            continue
+        if isinstance(node, ast.ClassDef) and node.name == "OmyPose":
+            continue
+        filtered_body.append(node)
+    tree.body = filtered_body
+    ast.fix_missing_locations(tree)
+
+    module_name = "_fr3_block_push_external_controller"
+    module = ModuleType(module_name)
+    module.__file__ = str(bridge_path)
+    sys.modules[module_name] = module
+    try:
+        exec(compile(tree, str(bridge_path), "exec"), module.__dict__)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
 @dataclass(frozen=True)
 class TeleopState:
     mode: str
@@ -121,11 +162,32 @@ class TeleopBackend:
         teleop_root: Path,
         model: mujoco.MjModel,
         data: mujoco.MjData,
+        *,
+        input_backend: str = "ros",
+        teleop_mode: str = "full_pose",
+        omy_endpoint: str = "tcp://127.0.0.1:5557",
+        omy_stale_timeout: float = 0.2,
     ) -> None:
+        if input_backend not in INPUT_BACKENDS:
+            raise ValueError(
+                f"input_backend must be one of {sorted(INPUT_BACKENDS)}"
+            )
+        if omy_stale_timeout <= 0:
+            raise ValueError("omy_stale_timeout must be positive")
         self.teleop_root = teleop_root
         self.model = model
         self.data = data
-        self.bridge = _load_bridge(teleop_root)
+        self.input_backend = input_backend
+        self.omy_endpoint = omy_endpoint
+        self.omy_stale_timeout = float(omy_stale_timeout)
+        self.bridge = (
+            _load_bridge(teleop_root)
+            if input_backend == "ros"
+            else _load_controller_only_bridge(teleop_root)
+        )
+        if teleop_mode not in self.bridge.SUPPORTED_TELEOP_MODES:
+            raise ValueError(f"unsupported teleop_mode: {teleop_mode}")
+        self.teleop_mode = teleop_mode
         self.dt = float(model.opt.timestep)
 
         omy_path = teleop_root / OMY_RELATIVE_PATH
@@ -176,10 +238,19 @@ class TeleopBackend:
         ].copy()
         self.ros_node = None
         self.ros_thread: threading.Thread | None = None
+        self.omy_client = None
         self.gripper_command = 0.0
         self.reset_controller_state()
 
     def initialize(self) -> None:
+        if self.input_backend == "zmq":
+            from ..ipc.omy_state_client import OmyStateClient
+
+            self.omy_client = OmyStateClient(
+                self.omy_endpoint,
+                stale_timeout=self.omy_stale_timeout,
+            )
+            return
         rclpy = self.bridge.rclpy
         if not rclpy.ok():
             rclpy.init()
@@ -213,8 +284,33 @@ class TeleopBackend:
         self.fr3_anchor_position = position.copy()
         self.fr3_anchor_rotation = rotation.copy()
         self.ros_fresh = False
+        self.input_fresh = False
 
     def update_omy_state(self) -> tuple[np.ndarray, float, float, bool]:
+        if self.input_backend == "zmq":
+            if self.omy_client is None:
+                raise RuntimeError("initialize() must be called before teleoperation")
+            state = self.omy_client.read()
+            if state.message is None:
+                return (
+                    self.joint_positions.copy(),
+                    float(self.bridge.TRIGGER_OFF_THRESHOLD),
+                    self.gripper_command,
+                    False,
+                )
+            target = np.asarray(state.message.position, dtype=float)
+            if target.shape != (6,) or not np.all(np.isfinite(target)):
+                return (
+                    self.joint_positions.copy(),
+                    float(self.bridge.TRIGGER_OFF_THRESHOLD),
+                    self.gripper_command,
+                    False,
+                )
+            if state.fresh:
+                self.joint_positions[:] = target
+            trigger = float(state.message.trigger_position)
+            return target, trigger, self.gripper_command, state.fresh
+
         if self.ros_node is None:
             raise RuntimeError("initialize() must be called before teleoperation")
         with self.state_lock:
@@ -231,6 +327,8 @@ class TeleopBackend:
 
     def update_command(self, dt: float) -> None:
         omy_target, trigger, self.gripper_command, fresh = self.update_omy_state()
+        recovered = fresh and not self.input_fresh
+        self.input_fresh = fresh
         self.ros_fresh = fresh
         if not fresh:
             self.teleop_active = False
@@ -239,6 +337,15 @@ class TeleopBackend:
             self.fr3_command_position = self.fr3_target_position.copy()
             self.fr3_command_rotation = self.fr3_target_rotation.copy()
             return
+
+        if recovered:
+            # The first state after startup/staleness becomes the new OMY
+            # reference. This makes its initial Cartesian delta exactly zero.
+            self.teleop_active = False
+            self.target_linear_velocity.fill(0.0)
+            self.target_angular_velocity.fill(0.0)
+            self.fr3_command_position = self.fr3_target_position.copy()
+            self.fr3_command_rotation = self.fr3_target_rotation.copy()
 
         for address, position in zip(self.omy_qpos_addresses, omy_target):
             self.omy_data.qpos[address] = position
@@ -274,7 +381,7 @@ class TeleopBackend:
                 self.fr3_anchor_position,
                 self.fr3_anchor_rotation,
             )
-            mode = self.bridge.TELEOP_MODE
+            mode = self.teleop_mode
             if mode == "position_only":
                 self.fr3_command_position = desired_position
                 self.fr3_command_rotation = self.fr3_anchor_rotation.copy()
@@ -333,7 +440,7 @@ class TeleopBackend:
                 self.jacp,
                 self.jacr,
                 dt,
-                teleop_mode=self.bridge.TELEOP_MODE,
+                teleop_mode=self.teleop_mode,
                 enable_nullspace_posture=self.bridge.ENABLE_NULLSPACE_POSTURE,
                 q_posture_reference=self.nullspace_posture_reference,
             )
@@ -344,7 +451,7 @@ class TeleopBackend:
     def get_state(self) -> TeleopState:
         actual, _ = self.bridge.read_site_pose(self.data, self.fr3_ee_site_id)
         return TeleopState(
-            mode=self.bridge.TELEOP_MODE,
+            mode=self.teleop_mode,
             active=self.teleop_active,
             ros_fresh=self.ros_fresh,
             clutch_count=self.clutch_count,
@@ -354,8 +461,11 @@ class TeleopBackend:
         )
 
     def shutdown(self) -> None:
+        if self.omy_client is not None:
+            self.omy_client.close()
+            self.omy_client = None
         if self.ros_node is not None:
             self.ros_node.destroy_node()
             self.ros_node = None
-        if self.bridge.rclpy.ok():
+        if self.input_backend == "ros" and self.bridge.rclpy.ok():
             self.bridge.rclpy.shutdown()

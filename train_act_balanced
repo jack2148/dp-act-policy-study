@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DATASET_ROOT="${DATASET_ROOT:-${ROOT}/datasets/data_act_balanced_140}"
+OUTPUT_DIR="${OUTPUT_DIR:-${ROOT}/outputs/train/act_fr3_balanced_140}"
+STEPS="${STEPS:-5000}"
+BATCH_SIZE="${BATCH_SIZE:-8}"
+
+if [[ ! -f "${DATASET_ROOT}/meta/info.json" ]]; then
+  echo "Missing dataset: ${DATASET_ROOT}" >&2
+  echo "Run: python3 projects/fr3_block_push/scripts/prepare_act_balanced_dataset.py" >&2
+  exit 1
+fi
+if ! python3 - <<'PY'
+try:
+    import accelerate
+except ImportError:
+    raise SystemExit(1)
+PY
+then
+  echo "Install accelerate with: python3 -m pip install accelerate" >&2
+  exit 1
+fi
+if ! python3 - <<'PY'
+import torch
+print(f"CUDA available: {torch.cuda.is_available()}")
+raise SystemExit(0 if torch.cuda.is_available() else 1)
+PY
+then
+  echo "CUDA is not available." >&2
+  exit 1
+fi
+cd "${ROOT}"
+export PYTHONPATH="${ROOT}/lerobot/src${PYTHONPATH:+:${PYTHONPATH}}"
+exec python3 -m lerobot.scripts.lerobot_train \
+  --policy.type=act \
+  --dataset.repo_id=local/fr3_block_push_act_balanced \
+  --dataset.root="${DATASET_ROOT}" \
+  --output_dir="${OUTPUT_DIR}" \
+  --job_name=act_fr3_balanced_140 \
+  --policy.device=cuda \
+  --policy.chunk_size=64 \
+  --policy.n_action_steps=32 \
+  --policy.temporal_ensemble_coeff=null \
+  --policy.push_to_hub=false \
+  --steps="${STEPS}" \
+  --batch_size="${BATCH_SIZE}" \
+  --wandb.enable=false

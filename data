@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+STUDY_ROOT="/home/chan/dp-act-policy-study"
+TELEOP_ROOT="${OMY_FRANKA_TELEOP_ROOT:-/home/chan/omy_franka_teleop}"
+TELEOP_COMMAND="${TELEOP_ROOT}/teleop"
+ROS_DISTRO_SETUP="/opt/ros/humble/setup.bash"
+OMY_SETUP="${TELEOP_ROOT}/open_manipulator_omy/install/setup.bash"
+PUBLISHER_SCRIPT="${STUDY_ROOT}/projects/fr3_block_push/scripts/publish_omy_joint_state.py"
+COLLECTOR_SCRIPT="${STUDY_ROOT}/projects/fr3_block_push/scripts/collect_dataset.py"
+IPC_INSPECTOR_SCRIPT="${STUDY_ROOT}/projects/fr3_block_push/scripts/inspect_omy_ipc.py"
+COLLECT_PYTHON="${FR3_DATA_PYTHON:-python3}"
+OMY_ENDPOINT="tcp://127.0.0.1:5557"
+OMY_LOCK_FILE="/tmp/dp-act-policy-study-omy.lock"
+
+exec 9>>"${OMY_LOCK_FILE}"
+if ! flock -n 9; then
+  echo "DATA COLLECTION FAILED: another ./run or ./data process is already using OMY." >&2
+  [[ ! -s "${OMY_LOCK_FILE}" ]] || cat "${OMY_LOCK_FILE}" >&2
+  exit 1
+fi
+printf 'lock_owner=data pid=%s started=%s\n' "$$" "$(date --iso-8601=seconds)" >"${OMY_LOCK_FILE}"
+
+PORT_NAME="/dev/ttyUSB0"
+if [[ $# -gt 0 && "$1" != --* ]]; then
+  PORT_NAME="$1"
+  shift
+fi
+
+DATASET_ROOT="${FR3_DATASET_ROOT:-${STUDY_ROOT}/datasets/data_success_50_v3}"
+DATASET_EPISODES="${FR3_DATASET_EPISODES:-50}"
+
+TELEOP_PID=""
+PUBLISHER_PID=""
+COLLECTOR_PID=""
+
+cleanup() {
+  trap - EXIT INT TERM
+
+  for process_id in "${COLLECTOR_PID}" "${PUBLISHER_PID}" "${TELEOP_PID}"; do
+    if [[ -n "${process_id}" ]] && kill -0 "${process_id}" 2>/dev/null; then
+      kill -INT "${process_id}" 2>/dev/null || true
+    fi
+  done
+
+  for process_id in "${COLLECTOR_PID}" "${PUBLISHER_PID}" "${TELEOP_PID}"; do
+    [[ -z "${process_id}" ]] || wait "${process_id}" 2>/dev/null || true
+  done
+}
+trap cleanup EXIT INT TERM
+
+echo "Starting OMY leader on ${PORT_NAME}"
+"${TELEOP_COMMAND}" "${PORT_NAME}" 9>&- &
+TELEOP_PID=$!
+
+sleep 2
+if ! kill -0 "${TELEOP_PID}" 2>/dev/null; then
+  wait "${TELEOP_PID}"
+fi
+
+(
+  exec 9>&-
+  set +u
+  source "${ROS_DISTRO_SETUP}"
+  source "${OMY_SETUP}"
+  if ros2 control set_controller_state \
+    joint_trajectory_command_broadcaster inactive \
+    --controller-manager /leader/controller_manager \
+    --spin-time 1 >/dev/null 2>&1; then
+    echo "Disabled unused collision trajectory warnings"
+  else
+    echo "Warning: could not disable collision trajectory warnings" >&2
+  fi
+)
+
+echo "Starting ROS-to-ZMQ bridge on ${OMY_ENDPOINT}"
+(
+  exec 9>&-
+  set +u
+  source "${ROS_DISTRO_SETUP}"
+  source "${OMY_SETUP}"
+  exec /usr/bin/python3 "${PUBLISHER_SCRIPT}" \
+    --topic /leader/joint_states \
+    --endpoint "${OMY_ENDPOINT}"
+) &
+PUBLISHER_PID=$!
+
+sleep 1
+if ! kill -0 "${PUBLISHER_PID}" 2>/dev/null; then
+  wait "${PUBLISHER_PID}"
+fi
+
+cd "${STUDY_ROOT}"
+echo "Waiting for a valid /leader/joint_states sample"
+if ! "${COLLECT_PYTHON}" "${IPC_INSPECTOR_SCRIPT}" \
+  --endpoint "${OMY_ENDPOINT}" \
+  --duration 5 \
+  --require-message; then
+  echo "DATA COLLECTION FAILED: no OMY joint state received." >&2
+  echo "Check that no previous ./run or ./data process is active, then verify the serial port." >&2
+  exit 1
+fi
+
+echo "Starting dataset collection (target: ${DATASET_EPISODES} saved episodes)"
+echo "Default dataset root: ${DATASET_ROOT}"
+"${COLLECT_PYTHON}" "${COLLECTOR_SCRIPT}" \
+  --teleop-root "${TELEOP_ROOT}" \
+  --dataset-root "${DATASET_ROOT}" \
+  --episodes "${DATASET_EPISODES}" \
+  --success-margin 0.025 \
+  --fail-dataset-root "${DATASET_ROOT}_fail" \
+  --input-backend zmq \
+  --omy-endpoint "${OMY_ENDPOINT}" \
+  "$@" 9>&- &
+COLLECTOR_PID=$!
+
+set +e
+wait "${COLLECTOR_PID}"
+COLLECTOR_STATUS=$?
+set -e
+
+exit "${COLLECTOR_STATUS}"
