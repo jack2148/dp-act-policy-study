@@ -1,128 +1,93 @@
-# FR3 block-pushing environment
+# FR3 블록 밀기 환경
 
-## Purpose and ownership
+## 목적과 책임 범위
 
-This milestone adds a MuJoCo-only planar block-pushing task driven by the
-existing OMY-to-FR3 teleoperation controller.
+이 프로젝트는 기존 OMY-to-FR3 텔레오퍼레이션 컨트롤러로 조작하는 MuJoCo 전용 평면 블록 밀기 태스크를 추가한다.
 
-`OMY_FRANKA_TELEOP` remains the source of truth for OMY MuJoCo FK, Cartesian
-mapping, cumulative clutch behavior, target conditioning,
-velocity-DLS IK, null-space posture, FR3 commands, and FR3 assets. This project
-owns the table, block, fixed goal, camera, primitive push tool, reset, task
-evaluation, viewer, and final simulation loop. The dependency is one-way:
-`dp-act-policy-study` imports the teleop implementation; the teleop repository
-does not know about this task.
+OMY MuJoCo 순기구학(FK), Cartesian 매핑, 누적 클러치 동작, 목표값 조정, velocity-DLS 역기구학(IK), null-space 자세 제어, FR3 명령 및 FR3 에셋의 기준 구현은 계속 `OMY_FRANKA_TELEOP`에 있다. 이 프로젝트는 테이블, 블록, 고정 목표 영역, 카메라, 기본 밀기 도구, 리셋, 태스크 평가, 뷰어, 최종 시뮬레이션 루프를 담당한다. 의존성은 단방향이다. `dp-act-policy-study`가 텔레오퍼레이션 구현을 가져오며, 텔레오퍼레이션 저장소는 이 태스크를 알지 못한다.
 
-The runner owns one final FR3/task `MjModel`, one `MjData`, and one `mj_step`
-loop. A separate OMY model is used only for leader FK, as in the existing
-teleop implementation; it is not stepped as a second simulator.
+실행기는 하나의 최종 FR3/태스크 `MjModel`, 하나의 `MjData`, 하나의 `mj_step` 루프를 소유한다. 별도의 OMY 모델은 기존 텔레오퍼레이션 구현과 마찬가지로 리더 FK 계산에만 사용하며, 두 번째 시뮬레이터로 step하지 않는다.
 
-## Dependency setup
+## 의존성 설정
 
-The dependency root is resolved once, in this priority order:
+의존성 루트는 다음 우선순위에 따라 한 번만 결정한다.
 
 1. `--teleop-root`
 2. `OMY_FRANKA_TELEOP_ROOT`
-3. sibling `../OMY_FRANKA_TELEOP` (lowercase sibling is also accepted)
+3. 인접한 `../OMY_FRANKA_TELEOP` 디렉터리(소문자 이름도 허용)
 
-The expected dependency contains `launch/FR3_omy_bridge.py`,
-`mujoco_menagerie/franka_fr3/fr3.xml`, and the OMY model.
-Both Python environments also need `pyzmq` (tested with `27.1.0`).
+의존성 저장소에는 `launch/FR3_omy_bridge.py`, `mujoco_menagerie/franka_fr3/fr3.xml`, OMY 모델이 있어야 한다. 두 Python 환경 모두 `pyzmq`가 필요하다(`27.1.0`에서 검증).
 
 ```bash
 export OMY_FRANKA_TELEOP_ROOT=../OMY_FRANKA_TELEOP
 ```
 
-## Inspect and run
+## 환경 확인 및 실행
 
-Scene inspection does not require ROS or OMY hardware:
+장면 확인에는 ROS나 OMY 하드웨어가 필요하지 않다.
 
 ```bash
 python projects/fr3_block_push/scripts/inspect_scene.py \
   --teleop-root ../OMY_FRANKA_TELEOP
 ```
 
-Run the OMY leader and simulation together from the study root:
+연구 저장소 루트에서 OMY 리더와 시뮬레이션을 함께 실행한다.
 
 ```bash
 ./run
 ```
 
-Pass a serial port as the first argument when it is not `/dev/ttyUSB0`, for
-example `./run /dev/ttyUSB1`.
+시리얼 포트가 `/dev/ttyUSB0`이 아니면 첫 번째 인자로 전달한다. 예: `./run /dev/ttyUSB1`.
 
-Keyboard controls:
+키보드 조작:
 
-- `R`: deterministic reset
-- `V`: toggle free and fixed operator camera views
-- `SPACE`: print task status
-- `Q` or `ESC`: quit
+- `R`: 결정론적 리셋
+- `V`: 자유 시점과 고정 조작자 카메라 전환
+- `SPACE`: 태스크 상태 출력
+- `Q` 또는 `ESC`: 종료
 
-The runner prints block position/speed, goal error, success hold time, task
-state, teleop mode, selected input freshness, and reset count at 5 Hz.
+실행기는 블록 위치/속도, 목표 오차, 성공 유지 시간, 태스크 상태, 텔레오퍼레이션 모드, 선택된 입력의 최신성, 리셋 횟수를 5Hz로 출력한다.
 
-Tests use the standard library and do not require ROS:
+테스트는 Python 표준 라이브러리만 사용하며 ROS가 필요하지 않다.
 
 ```bash
 python -m unittest discover -s projects/fr3_block_push/tests -v
 ```
 
-## Split-process OMY input
+## 프로세스 분리형 OMY 입력
 
-The default direct `ros` input backend remains available. Dataset collection on
-this machine should use `--input-backend zmq` so ROS 2 Humble stays in Python
-3.10 and LeRobot/MuJoCo stay in Python 3.13:
+기본 직접 `ros` 입력 백엔드도 사용할 수 있다. 이 장비에서 데이터를 수집할 때는 ROS 2 Humble을 Python 3.10에, LeRobot/MuJoCo를 Python 3.13에 유지하기 위해 `--input-backend zmq`를 사용한다.
 
 ```text
-Process A (Python 3.10)
-/leader/joint_states -> name reorder/validation -> ZeroMQ PUB
+프로세스 A (Python 3.10)
+/leader/joint_states -> 이름 재정렬/검증 -> ZeroMQ PUB
                                       tcp://127.0.0.1:5557
-Process B (Python 3.13)
-ZeroMQ SUB -> existing OMY FK/mapping/conditioning/IK -> final FR3 task sim
-           -> 20 Hz LeRobot recorder
+프로세스 B (Python 3.13)
+ZeroMQ SUB -> 기존 OMY FK/매핑/조정/IK -> 최종 FR3 태스크 시뮬레이션
+           -> 20Hz LeRobot 레코더
 ```
 
-Process A imports `rclpy`, `sensor_msgs`, and `pyzmq`, but never MuJoCo,
-LeRobot, or the FR3 controller. It accepts exactly one occurrence of each ROS
-joint `joint1` through `joint6` plus trigger `rh_r1_joint`, permits unrelated
-extra joints, and converts the six arm joints to the MuJoCo/wire names
-`Joint1` through `Joint6` in canonical order. Invalid ROS messages are dropped
-with a throttled warning.
+프로세스 A는 `rclpy`, `sensor_msgs`, `pyzmq`를 가져오지만 MuJoCo, LeRobot, FR3 컨트롤러는 가져오지 않는다. ROS 관절 `joint1`부터 `joint6`과 트리거 `rh_r1_joint`가 각각 정확히 하나씩 있는 메시지만 허용하며, 무관한 추가 관절은 허용한다. 여섯 팔 관절은 정규 순서의 MuJoCo/전송 이름 `Joint1`부터 `Joint6`으로 변환한다. 잘못된 ROS 메시지는 제한된 빈도의 경고와 함께 버린다.
 
-Process B uses a non-blocking ZeroMQ `SUB` socket with receive high-water mark
-1 and `CONFLATE`, then drains all immediately available messages. This prevents
-a control-loop backlog and selects the newest valid sequence. In ZMQ mode the
-external bridge is parsed controller-only: its ROS imports and `OmyPose` Node
-class are excluded, while its original FK helpers, Cartesian mapping, target
-conditioning, and DLS IK functions are executed unchanged. Neither `rclpy` nor
-`sensor_msgs` is imported in the collector process.
+프로세스 B는 receive high-water mark 1과 `CONFLATE`를 설정한 비차단 ZeroMQ `SUB` 소켓을 사용한 뒤, 즉시 읽을 수 있는 메시지를 모두 비운다. 따라서 제어 루프에 메시지가 쌓이지 않으며 가장 최신의 유효 sequence를 선택한다. ZMQ 모드에서는 외부 브리지를 컨트롤러 부분만 파싱한다. ROS import와 `OmyPose` Node 클래스는 제외하지만 기존 FK 보조 함수, Cartesian 매핑, 목표 조정, DLS IK 함수는 변경 없이 실행한다. 수집 프로세스는 `rclpy`나 `sensor_msgs`를 가져오지 않는다.
 
-The single-part UTF-8 JSON message has these exact fields:
+단일 파트 UTF-8 JSON 메시지의 필드는 정확히 다음과 같다.
 
-| Field | Type | Meaning |
+| 필드 | 자료형 | 의미 |
 | --- | --- | --- |
-| `protocol_version` | non-negative integer | Currently `2` |
-| `sequence` | non-negative integer | Strictly increasing publisher sequence |
-| `source_timestamp_ns` | non-negative integer | ROS `JointState.header.stamp` |
-| `sender_monotonic_ns` | non-negative integer | Publisher monotonic clock |
-| `joint_names` | six strings | Canonical `Joint1` ... `Joint6` |
-| `position` | six finite numbers | OMY joint positions, radians |
-| `trigger_position` | finite number | Physical `rh_r1_joint` clutch position, radians |
+| `protocol_version` | 0 이상의 정수 | 현재 버전 `2` |
+| `sequence` | 0 이상의 정수 | 엄격하게 증가하는 publisher sequence |
+| `source_timestamp_ns` | 0 이상의 정수 | ROS `JointState.header.stamp` |
+| `sender_monotonic_ns` | 0 이상의 정수 | publisher monotonic clock |
+| `joint_names` | 문자열 6개 | 정규 이름 `Joint1` ... `Joint6` |
+| `position` | 유한한 숫자 6개 | OMY 관절 위치, 단위 rad |
+| `trigger_position` | 유한한 숫자 | 물리 `rh_r1_joint` 클러치 위치, 단위 rad |
 
-Malformed JSON, wrong/missing/extra protocol fields, wrong version, missing or
-duplicate required joints/trigger, non-6D position, NaN/Inf, and non-increasing
-sequences are ignored. Freshness uses local receive monotonic time rather than
-trusting sender timestamps. The default stale timeout is `0.2 s`.
+잘못된 JSON, 누락되거나 추가된 프로토콜 필드, 잘못된 버전, 필수 관절/트리거 누락 또는 중복, 6차원이 아닌 position, NaN/Inf, 증가하지 않는 sequence는 무시한다. 최신성은 송신자 timestamp를 신뢰하지 않고 로컬 수신 monotonic time으로 판단한다. 기본 stale timeout은 `0.2 s`이다.
 
-Before the first valid state, or while stale, the backend disables new target
-updates, zeros target velocities, and holds the last FR3 joint-position target.
-The runner suppresses camera/state/action capture while input is stale, so no
-dataset frame is added. On the first valid state and after stale recovery, the
-existing clutch path anchors OMY at the newly received state and FR3 at its
-current command before applying deltas. This prevents accumulated motion and
-reconnection target jumps.
+첫 유효 상태를 받기 전이나 입력이 stale인 동안에는 새 목표 업데이트를 비활성화하고 목표 속도를 0으로 만들며 마지막 FR3 관절 위치 목표를 유지한다. 입력이 stale인 동안 실행기는 카메라/상태/action 캡처를 중단하므로 데이터셋 frame이 추가되지 않는다. 첫 유효 상태 수신 시점과 stale 복구 직후에는 기존 클러치 경로가 새로 받은 상태에 OMY를, 현재 명령에 FR3를 고정한 뒤 delta를 적용한다. 이 방식으로 누적 움직임과 재연결 시 목표값 점프를 막는다.
 
-Start Process A in a ROS 2 Humble terminal:
+ROS 2 Humble 터미널에서 프로세스 A를 시작한다.
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -134,7 +99,7 @@ cd /home/chan/dp-act-policy-study
   --endpoint tcp://127.0.0.1:5557
 ```
 
-Optionally inspect transport health from the Python 3.13 environment:
+선택적으로 Python 3.13 환경에서 전송 상태를 확인할 수 있다.
 
 ```bash
 python3 projects/fr3_block_push/scripts/inspect_omy_ipc.py \
@@ -142,113 +107,63 @@ python3 projects/fr3_block_push/scripts/inspect_omy_ipc.py \
   --stale-timeout 0.2
 ```
 
-## LeRobot demonstration recording
+## LeRobot 시연 데이터 기록
 
-The collection path keeps responsibilities separate: `TeleopRunner` owns the
-single final MuJoCo model/data, the existing OMY controller, camera rendering,
-stepping, task evaluation, and reset. `FrameExtractor` converts one synchronized
-runner sample into the schema below. `DatasetRecorder` alone owns
-`LeRobotDataset.create`, `add_frame`, `save_episode`,
-`clear_episode_buffer`, and `finalize`. No LeRobot source file is modified.
+수집 경로는 책임을 분리한다. `TeleopRunner`는 하나의 최종 MuJoCo model/data, 기존 OMY 컨트롤러, 카메라 렌더링, step 실행, 태스크 평가, 리셋을 담당한다. `FrameExtractor`는 동기화된 실행기 표본 하나를 아래 schema로 변환한다. `DatasetRecorder`만 `LeRobotDataset.create`, `add_frame`, `save_episode`, `clear_episode_buffer`, `finalize`를 담당한다. LeRobot 소스 파일은 수정하지 않는다.
 
-### Dataset schema
+### 데이터셋 스키마
 
-The dataset FPS is fixed at 20 Hz and the task text is exactly
-`Push the block into the goal region.`. LeRobot automatically creates
-`timestamp`, `frame_index`, `episode_index`, `index`, and `task_index`.
+데이터셋 FPS는 20Hz로 고정하며 태스크 문장은 정확히 `Push the block into the goal region.`이다. LeRobot이 `timestamp`, `frame_index`, `episode_index`, `index`, `task_index`를 자동으로 생성한다.
 
-| Feature | add_frame representation | Meaning |
+| feature | `add_frame` 표현 | 의미 |
 | --- | --- | --- |
-| `observation.images.top` | `(96, 96, 3)` HWC `uint8`, video | Offscreen RGB from `policy_camera_top` |
-| `observation.state` | `(7,)` `float32` | Current `qpos` of `fr3_joint1` ... `fr3_joint7`, rad |
-| `action` | `(7,)` `float32` | Joint-position reference actually written to the seven FR3 arm actuators, rad |
+| `observation.images.top` | `(96, 96, 3)` HWC `uint8`, video | `policy_camera_top`의 offscreen RGB |
+| `observation.state` | `(7,)` `float32` | `fr3_joint1` ... `fr3_joint7`의 현재 `qpos`, 단위 rad |
+| `action` | `(7,)` `float32` | FR3 팔 actuator 7개에 실제 기록한 관절 위치 기준값, 단위 rad |
 
-The state intentionally excludes the gripper, block pose, goal pose, and task
-success. Those task-only quantities are used by environment termination logic,
-not as policy inputs.
+state에서는 의도적으로 gripper, 블록 pose, 목표 pose, 태스크 성공 여부를 제외한다. 태스크 전용 값은 환경 종료 로직에만 사용하며 policy 입력으로 사용하지 않는다.
 
-The FR3 Menagerie model defines `fr3_joint1` through `fr3_joint7` as MuJoCo
-`<position>` actuators. Runtime validation also checks that each actuator is a
-unit-gear joint transmission with fixed positive gain and affine position bias
-`-gain`. The external controller computes `backend.hold_q_target`, then
-`TeleopBackend.apply_controller` writes it to
-`data.ctrl[backend.fr3_actuator_indices]`. The recorder reads that applied
-`data.ctrl` slice after the write. It is a desired position in radians, not
-torque, velocity, Cartesian pose, or the measured joint state. The gripper
-control is not recorded.
+FR3 Menagerie 모델은 `fr3_joint1`부터 `fr3_joint7`을 MuJoCo `<position>` actuator로 정의한다. 실행 시 검증에서는 각 actuator가 unit-gear joint transmission이며, 고정된 양의 gain과 `-gain`의 affine position bias를 갖는지도 확인한다. 외부 컨트롤러가 `backend.hold_q_target`을 계산하면 `TeleopBackend.apply_controller`가 이를 `data.ctrl[backend.fr3_actuator_indices]`에 기록한다. 레코더는 기록 직후 적용된 `data.ctrl` slice를 읽는다. 이 값은 rad 단위의 목표 위치이며 torque, velocity, Cartesian pose, 측정 관절 상태가 아니다. gripper control은 기록하지 않는다.
 
-### Phase-1 hybrid ACT experiment
+### 1단계 하이브리드 ACT 실험
 
-The collector also stores `observation.ee_pose` (`qw,qx,qy,qz,x,y,z`) and
-`observation.goal_distance` (XY distance in meters). ACT consumes the exact
-`observation.state` feature, so `projects/fr3_block_push/scripts/prepare_hybrid_dataset.py`
-packs those values into a 15-dimensional state (7 joints + 7 EE-pose values +
-XY distance), while keeping the 7-dimensional joint-position action. The
-original dataset is unchanged; the converted dataset is
-`datasets/data_success_50_v3_hybrid`.
+수집기는 `observation.ee_pose`(`qw,qx,qy,qz,x,y,z`)와 `observation.goal_distance`(m 단위 XY 거리)도 저장한다. ACT는 정확히 `observation.state` feature를 사용하므로 `projects/fr3_block_push/scripts/prepare_hybrid_dataset.py`가 이 값들을 15차원 state(관절 7개 + EE pose 7개 + XY 거리)로 묶고, 7차원 관절 위치 action은 유지한다. 원본 데이터셋은 변경하지 않으며 변환된 데이터셋은 `datasets/data_success_50_v3_hybrid`이다.
 
-After conversion, start the CUDA training run with `./train_hybrid`. The
-defaults are 5,000 steps, batch size 8, chunk size 64, and 32 executed actions
-per predicted chunk. Override them with `STEPS`, `BATCH_SIZE`, `CHUNK_SIZE`, or
-`N_ACTION_STEPS` when needed.
+변환 후 `./train_hybrid`로 CUDA 학습을 시작한다. 기본값은 5,000 step, batch size 8, chunk size 64, 예측 chunk당 실행 action 32개다. 필요하면 `STEPS`, `BATCH_SIZE`, `CHUNK_SIZE`, `N_ACTION_STEPS`로 덮어쓴다.
 
-## ACT/DP experiment status
+## ACT/DP 실험 현황
 
-The first ACT experiment used 50 episodes. The policy repeatedly stopped before
-the goal, which indicated insufficient approach-direction and recovery
-demonstrations rather than a simulator/actuator failure. The failure analysis
-and the resulting data-collection conclusion are documented in
-[the original-50 analysis](docs/act_original_50_failure_analysis.md).
+첫 ACT 실험은 50 episode를 사용했다. policy가 목표 앞에서 반복적으로 멈췄으며, 이는 simulator/actuator 고장보다 접근 방향 및 복구 시연 부족을 가리켰다. 실패 분석과 그에 따른 데이터 수집 결론은 [기존 50개 데이터 기반 ACT 실패 분석](docs/act_original_50_failure_analysis.md)에 정리했다.
 
-![Initial vibration/failure rollout](../../vibration.gif)
+![초기 진동 및 실패 rollout](../../vibration.gif)
 
-The balanced dataset adds 30 right-approach, 30 center-approach, and 30
-left-approach episodes to the original 50 (140 episodes total). Under the same
-fixed initial condition and 5,000 training steps, the verified comparison is:
+균형 데이터셋은 기존 50 episode에 오른쪽 접근 30개, 중앙 접근 30개, 왼쪽 접근 30개를 더한 총 140 episode다. 같은 고정 초기조건과 5,000 학습 step에서 검증한 결과는 다음과 같다.
 
-| Metric | ACT | Diffusion Policy |
+| 지표 | ACT | Diffusion Policy |
 | --- | ---: | ---: |
-| Dataset | balanced-140 | balanced-140 |
-| Training steps | 5,000 | 5,000 |
-| Evaluation episodes | 5 | 5 |
-| Success episodes | 5/5 | 1/5 |
-| Success rate | 100% | 20% |
-| Final goal distance (mean) | 0.0312 m | 0.0778 m |
-| Max lateral deviation (mean) | 0.0270 m | 0.0795 m |
+| 데이터셋 | balanced-140 | balanced-140 |
+| 학습 step | 5,000 | 5,000 |
+| 평가 episode | 5 | 5 |
+| 성공 episode | 5/5 | 1/5 |
+| 성공률 | 100% | 20% |
+| 최종 목표 거리 평균 | 0.0312m | 0.0778m |
+| 최대 측면 이탈 평균 | 0.0270m | 0.0795m |
 
-### ACT balanced-140 rollout
+### ACT balanced-140 성공 롤아웃
 
-The following compressed rollout shows the trained ACT policy completing the
-block-push task with the balanced 140-episode dataset.
+다음 압축 영상은 균형 잡힌 140-episode 데이터셋으로 학습한 ACT policy가 블록 밀기 태스크를 완료하는 모습을 보여준다.
 
-![ACT balanced-140 successful rollout](../../results/ACT_sucess_data_140.gif)
+![ACT balanced-140 성공 롤아웃](../../results/ACT_sucess_data_140.gif)
 
-The complete table, checkpoint/config verification, episode metrics, and DP
-5k/10k/15k ablation plan are in
-[the ACT vs DP 5k comparison](docs/act_vs_dp_5k_comparison.md).
+전체 비교표, checkpoint/config 검증, episode별 지표, DP 학습 step ablation 계획은 [ACT와 DP의 동일 5k 학습 예산 비교](docs/act_vs_dp_5k_comparison.md)에 정리했다.
 
-Observation/action alignment is pre-integration: for time `t`, the existing
-controller first computes and writes `action_t`; the runner then captures
-`image_t`, current `qpos_t`, and the applied `action_t`; only afterward does it
-call `mj_step`. Sampling decisions use `data.time`, not wall time, at intervals
-of `0.05 s`. LeRobot generates its timestamps from frame index and the declared
-20 FPS. A terminal event does not add an off-cadence frame.
+관측/action 정렬은 integration 이전 시점 기준이다. 시간 `t`에서 기존 컨트롤러가 먼저 `action_t`를 계산하고 기록한다. 실행기는 `image_t`, 현재 `qpos_t`, 적용된 `action_t`를 캡처한 다음 `mj_step`을 호출한다. 표본 시점은 wall time이 아니라 `data.time`을 사용해 `0.05 s` 간격으로 결정한다. LeRobot은 frame index와 선언된 20 FPS로 timestamp를 생성한다. terminal event에서는 정규 간격을 벗어난 frame을 추가하지 않는다.
 
-`policy_camera_top` is rendered with `mujoco.Renderer` from the final task
-`MjModel`/`MjData`; the interactive viewer framebuffer is never captured. A
-scene probe returned HWC `uint8` directly. A block moved from world `y=-0.2`
-to `y=+0.2` moved from image row 89 to row 38 at 128 px resolution, confirming
-the renderer's conventional top-left image orientation. Therefore collection
-does not vertically flip the image. MuJoCo returns RGB, so no BGR conversion is
-applied. When a saved video is loaded through LeRobot, its default decoder may
-present the sample as a channel-first floating tensor; that read-time form does
-not change the validated HWC `uint8` recording boundary or feature metadata.
+`policy_camera_top`은 최종 태스크 `MjModel`/`MjData`에서 `mujoco.Renderer`로 렌더링하며, 대화형 viewer framebuffer는 캡처하지 않는다. 장면 검사 결과 HWC `uint8`을 직접 반환했다. 128px 해상도에서 블록을 world `y=-0.2`에서 `y=+0.2`로 옮기면 이미지 row 89에서 row 38로 이동해 renderer의 일반적인 좌상단 원점을 확인했다. 따라서 수집 과정에서 이미지를 상하 반전하지 않는다. MuJoCo가 RGB를 반환하므로 BGR 변환도 적용하지 않는다. 저장된 video를 LeRobot으로 불러오면 기본 decoder가 channel-first 부동소수점 tensor로 보여줄 수 있다. 이 읽기 시점 표현은 검증된 HWC `uint8` 기록 경계나 feature metadata를 바꾸지 않는다.
 
-### Collection lifecycle and controls
+### 수집 생명주기와 조작키
 
-Run all three collection processes from the study root. The wrapper keeps the
-ROS bridge in its Python 3.10 subshell and the collector in the current Python
-3.12+ environment:
+연구 저장소 루트에서 세 수집 프로세스를 모두 실행한다. wrapper는 ROS bridge를 Python 3.10 subshell에 유지하고 수집기는 현재 Python 3.12+ 환경에서 실행한다.
 
 ```bash
 ./data \
@@ -256,35 +171,23 @@ ROS bridge in its Python 3.10 subshell and the collector in the current Python
   --episodes 30
 ```
 
-With no arguments, `./data` collects 30 saved episodes into a new timestamped
-directory under `datasets/`. Pass a serial port first when needed, for example
-`./data /dev/ttyUSB1 --episodes 30`. `FR3_DATA_PYTHON` can select the collector
-interpreter if `python3` is not the intended LeRobot environment.
+인자 없이 실행하면 `datasets/` 아래의 새 timestamp 디렉터리에 저장된 episode 30개를 수집한다. 필요하면 첫 번째 인자로 시리얼 포트를 전달한다. 예: `./data /dev/ttyUSB1 --episodes 30`. `python3`가 원하는 LeRobot 환경이 아니면 `FR3_DATA_PYTHON`으로 수집기 interpreter를 선택할 수 있다.
 
-The default local root is `datasets/fr3_block_push`. The command refuses to
-start if the selected root already exists; recording never appends to,
-overwrites, or uploads an existing dataset. `--repo-id` is metadata only and
-defaults to `local/fr3_block_push`. There is no Hub push.
+기본 로컬 루트는 `datasets/fr3_block_push`다. 선택한 루트가 이미 존재하면 실행을 거부한다. 기록 과정은 기존 데이터셋에 append하거나 overwrite하거나 upload하지 않는다. `--repo-id`는 metadata일 뿐이며 기본값은 `local/fr3_block_push`다. Hub push는 없다.
 
-Keys do not conflict with the existing `run_teleop.py` bindings (`R`, SPACE,
-and `Q`/ESC retain their meanings):
+조작키는 기존 `run_teleop.py` binding과 충돌하지 않는다(`R`, SPACE, `Q`/ESC의 의미는 유지).
 
-- `C`: reset fully, then start recording a new episode
-- `S`: save the buffered current episode, whether manually stopped or successful
-- `D`: discard the current buffer, reset, and immediately start re-recording
-- `R`: discard any current buffer, reset to FR3 home, and return to idle
-- `V`: toggle the operator viewer between its free camera and the fixed front view
-- `SPACE`: print collection and task status
-- `Q` or `ESC`: discard any unsaved buffer, finalize the dataset, and quit
+- `C`: 완전히 리셋한 뒤 새 episode 기록 시작
+- `S`: 수동 중지 또는 성공 여부와 관계없이 현재 buffer의 episode 저장
+- `D`: 현재 buffer를 버리고 리셋한 뒤 즉시 다시 기록
+- `R`: 현재 buffer를 버리고 FR3 home으로 리셋한 뒤 대기 상태로 전환
+- `V`: 조작자 viewer의 자유 카메라와 고정 전면 시점 전환
+- `SPACE`: 수집 및 태스크 상태 출력
+- `Q` 또는 `ESC`: 저장하지 않은 buffer를 버리고 데이터셋을 finalize한 뒤 종료
 
-An episode starts only after reset completes. On success, timeout, or leaving
-the workspace, sampling pauses and the simulation view is held. Nothing is
-saved automatically: press `S` to accept or `D` to discard and re-record.
-Manual `S` can also accept the current non-terminal episode. Empty episodes are
-rejected. Every reset path clears the current LeRobot buffer before another
-episode begins, preventing pre-reset and post-reset frames from mixing.
+episode는 리셋이 끝난 뒤에만 시작한다. 성공, timeout, 작업 영역 이탈 시 sampling을 중지하고 시뮬레이션 화면을 유지한다. 자동으로 저장하지 않으므로 `S`로 승인하거나 `D`로 버리고 다시 기록한다. terminal 상태가 아닌 현재 episode도 `S`로 저장할 수 있다. 빈 episode는 거부한다. 모든 reset 경로는 다음 episode 시작 전에 현재 LeRobot buffer를 비우므로 reset 전후 frame이 섞이지 않는다.
 
-Inspect a completed local dataset with:
+완성된 로컬 데이터셋은 다음 명령으로 검사한다.
 
 ```bash
 python projects/fr3_block_push/scripts/inspect_recorded_dataset.py \
@@ -292,66 +195,28 @@ python projects/fr3_block_push/scripts/inspect_recorded_dataset.py \
   --repo-id local/fr3_block_push
 ```
 
-This prints episode/frame counts, FPS, all features, and the first sample's
-image/state/action/timestamp/episode/frame shapes and dtypes. It performs no
-training or conversion.
+이 명령은 episode/frame 수, FPS, 모든 feature, 첫 표본의 image/state/action/timestamp/episode/frame shape와 dtype을 출력한다. 학습이나 변환은 수행하지 않는다.
 
-## Scene composition
+## 장면 구성
 
-At runtime, `scene_builder.py` parses the external FR3 XML, resolves its mesh
-directory, merges the local task elements, and injects the local primitive
-tool under the existing `fr3_hand` frame. It then compiles the resulting
-in-memory XML once. No FR3 XML or controller implementation is copied, no
-absolute local path is committed, and no generated artifact is saved.
+실행 시 `scene_builder.py`가 외부 FR3 XML을 파싱하고 mesh 디렉터리를 찾은 뒤 로컬 태스크 요소를 병합하고, 기존 `fr3_hand` frame 아래에 로컬 기본 밀기 도구를 삽입한다. 그 결과로 만든 메모리 내 XML을 한 번 compile한다. FR3 XML이나 컨트롤러 구현을 복사하지 않으며, 절대 로컬 경로를 commit하지 않고, 생성 artifact도 저장하지 않는다.
 
-This runtime-combined-XML approach is used because an absolute XML include
-does not preserve the included FR3 file's relative mesh directory in the
-installed MuJoCo version. The builder leaves both source repositories
-unchanged.
+설치된 MuJoCo 버전에서는 절대 경로 XML include가 포함된 FR3 파일의 상대 mesh 디렉터리를 보존하지 않기 때문에 실행 시 XML을 결합하는 방식을 사용한다. builder는 두 소스 저장소를 모두 변경하지 않는다.
 
-## Task definition
+## 태스크 정의
 
-The fixed table top is at `z=0.20 m`. A `0.30 kg` free-joint block with
-`0.035 m` half-size starts at `(0.62, 0.00, 0.235)`. The non-colliding visual
-goal is centered at `(0.80, 0.00, 0.202)` with `0.075 m` planar half-size.
-The top policy camera is fixed above the workspace. The separate overhead
-camera is only an operator viewer preset and is never recorded. Press `V` to
-toggle between that preset and the viewer's free camera. A capsule pusher
-attached to the FR3 hand ends just above the table in the home configuration.
+고정 테이블 상단은 `z=0.20 m`다. half-size `0.035 m`, 질량 `0.30 kg`인 free-joint 블록은 `(0.62, 0.00, 0.235)`에서 시작한다. 충돌하지 않는 시각적 목표 영역은 `(0.80, 0.00, 0.202)`를 중심으로 하며 평면 half-size는 `0.075 m`다. 상단 policy 카메라는 작업 영역 위에 고정한다. 별도 overhead 카메라는 조작자 viewer preset일 뿐이며 기록하지 않는다. `V`로 이 preset과 viewer 자유 카메라를 전환한다. FR3 hand에 부착한 capsule pusher의 끝은 home configuration에서 테이블 바로 위에 놓인다.
 
-Reset restores the seven FR3 joints and actuator targets from the external
-FR3 `home` keyframe, closes the unused gripper command, restores the block
-free-joint pose, zeros all velocities and actuator state, resets task timers,
-and calls `mj_forward`. Reset is deterministic by default; seeded small XY
-randomization can be enabled in `BlockPushConfig`.
+리셋은 외부 FR3 `home` keyframe에서 일곱 FR3 관절과 actuator 목표를 복원하고, 사용하지 않는 gripper 명령을 닫으며, 블록 free-joint pose를 복원한다. 모든 velocity와 actuator state, 태스크 timer를 초기화한 뒤 `mj_forward`를 호출한다. 기본 리셋은 결정론적이며 `BlockPushConfig`에서 seed 기반의 작은 XY 무작위화를 활성화할 수 있다.
 
-Success requires the whole block (including a margin) to remain inside the
-goal while planar speed is at most `0.01 m/s` for `0.5 s`. Leaving the
-configured table workspace or reaching the `120 s` episode timeout is failure.
-Evaluation reads state only and never changes the control loop.
+성공하려면 margin을 포함한 블록 전체가 목표 안에 들어간 상태에서 평면 속도 `0.01 m/s` 이하를 `0.5 s` 동안 유지해야 한다. 설정된 테이블 작업 영역을 벗어나거나 episode timeout `120 s`에 도달하면 실패다. 평가는 상태를 읽기만 하며 제어 루프를 변경하지 않는다.
 
-## References and limitations
+## 참고 자료와 한계
 
-The supplied `Push_MuJoCo` files were used only to study general table,
-free-block, visual-goal, camera, pusher, reset, and substep ideas. Their README
-identifies <https://github.com/JericLew/Push_MuJoCo> and MuJoCo Menagerie
-sources but provides no explicit project license. The originals therefore
-remain local-only under `references/Push_MuJoCo/` and are ignored by Git.
-Production code neither imports nor includes them and contains no Panda
-dependency.
+제공된 `Push_MuJoCo` 파일은 일반적인 테이블, free block, 시각적 목표, 카메라, pusher, reset, substep 아이디어를 조사하는 용도로만 사용했다. 해당 README는 <https://github.com/JericLew/Push_MuJoCo>와 MuJoCo Menagerie 출처를 명시하지만 프로젝트 license는 명시하지 않는다. 따라서 원본은 `references/Push_MuJoCo/` 아래에 로컬 전용으로 두고 Git에서 제외했다. production code는 이를 import하거나 include하지 않으며 Panda 의존성도 없다.
 
-This is simulation-only and does not claim real-robot safety. It does not
-include ACT or Diffusion Policy training, Hub upload, multi-camera data,
-multi-goal tasks, a gripper policy, or dataset resume/append.
+이 환경은 simulation 전용이며 실제 로봇 안전성을 보장하지 않는다. 환경 구현 자체에는 ACT 또는 Diffusion Policy 학습, Hub upload, multi-camera 데이터, multi-goal 태스크, gripper policy, 데이터셋 resume/append가 포함되지 않는다.
 
-ROS 2 Humble's Python 3.10 and LeRobot's Python 3.13 ABI conflict is isolated by
-the ZMQ process boundary. A publisher restart resets its sequence counter; the
-current strict anti-regression policy then requires restarting the collector as
-well. Hardware ROS joint naming/cadence, long-running publisher recovery,
-viewer keys during live recording, and real OMY-driven successful
-demonstrations have not yet been exercised.
+ROS 2 Humble의 Python 3.10과 LeRobot의 Python 3.13 ABI 충돌은 ZMQ 프로세스 경계로 분리했다. publisher를 재시작하면 sequence counter가 초기화되며, 현재의 엄격한 anti-regression 정책에서는 수집기도 함께 재시작해야 한다. 실제 하드웨어의 ROS 관절 이름/주기, 장시간 publisher 복구, 실시간 기록 중 viewer key, 실제 OMY로 수행한 성공 시연은 아직 검증하지 않았다.
 
-Finally, the action is a high-gain MuJoCo position-servo reference. It can
-differ from measured `qpos`, especially during contact, saturation, or fast
-motion. Consumers must not reinterpret it as torque, and sim-to-real use would
-need a separately verified controller/action interface.
+마지막으로 action은 high-gain MuJoCo position-servo 기준값이다. 접촉, saturation, 빠른 움직임 중에는 측정 `qpos`와 다를 수 있다. 이를 torque로 해석해서는 안 되며, sim-to-real 적용에는 별도로 검증한 controller/action interface가 필요하다.
