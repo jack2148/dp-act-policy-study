@@ -216,6 +216,13 @@ fixed initial condition and 5,000 training steps, the verified comparison is:
 | Final goal distance (mean) | 0.0312 m | 0.0778 m |
 | Max lateral deviation (mean) | 0.0270 m | 0.0795 m |
 
+### ACT balanced-140 rollout
+
+The following compressed rollout shows the trained ACT policy completing the
+block-push task with the balanced 140-episode dataset.
+
+![ACT balanced-140 successful rollout](../../results/ACT_sucess_data_140.gif)
+
 The complete table, checkpoint/config verification, episode metrics, and DP
 5k/10k/15k ablation plan are in
 [the ACT vs DP 5k comparison](docs/act_vs_dp_5k_comparison.md).
