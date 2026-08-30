@@ -47,6 +47,12 @@ Current work analyzes trajectory/task-region coverage and underrepresented condi
 | ACT baseline | on (0.01) | 1 | **2%** |
 | ACT, no ensemble | off | 32 | **12%** |
 
+### Benchmark context
+
+The original Diffusion Policy paper reports substantially stronger Push-T performance under its own benchmark protocol, but those numbers are not directly comparable to the `pc_success` metric used here. The published simulated Push-T evaluation uses target-area coverage, multiple training seeds, many randomized environment initializations, and a different training/evaluation configuration.
+
+This repository therefore treats the local Push-T experiments as controlled policy-behavior and execution-strategy studies within the LeRobot setup, rather than as a reproduction of the published Diffusion Policy benchmark.
+
 In this setup, changing the ACT execution strategy—disabling temporal ensembling and executing longer action segments—improved closed-loop success. Whether the gain comes primarily from temporal ensembling, action-horizon choice, or their interaction remains a follow-up question. Single-frame ACT observation (`n_obs_steps=1`) may also omit velocity/momentum; this remains a hypothesis rather than an isolated causal conclusion.
 
 <details><summary>Detailed ACT ablations</summary>
