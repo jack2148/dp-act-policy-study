@@ -304,7 +304,7 @@ dp-act-policy-study/
 │   ├── act_pusht_keypoints_100k_noensemble/         # 실험 5
 │   └── act_pusht_keypoints_100k_klweight1/          # 실험 6
 └── docs/
-    └── DP_code_analyze.md
+    └── code_analyze.md
 ```
 
 ---
